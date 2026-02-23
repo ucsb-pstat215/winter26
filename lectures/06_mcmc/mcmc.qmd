@@ -1,0 +1,1649 @@
+---
+title: 'Lecture 7: Markov Chain Monte Carlo'
+author: "Professor Alexander Franks"
+date: '`r Sys.Date()`'
+format: 
+  revealjs:
+   theme: default
+   slide-number: true
+   pdf-separate-fragments: true
+   html-math-method: mathjax
+---
+
+```{r, echo=FALSE, warning=FALSE}
+library(knitr)
+library(ggplot2)
+library(kableExtra)
+library(patchwork)
+library(coda)
+library(mvtnorm)
+library(tidyverse)
+library(cmdstanr)
+library(tidybayes)
+register_knitr_engine(override = TRUE)
+suppressPackageStartupMessages(library(tidyverse))
+opts_chunk$set(echo=FALSE, fig.align='center', out.width="60%") 
+knitr::opts_chunk$set(dpi=300, fig.width=7)
+options("kableExtra.html.bsTable" = T)
+ig <- function(file) {knitr::include_graphics(file)}
+source("../scripts/make_figs.R")
+source("../scripts/color_defs.R")
+```
+
+### Announcements
+
+-   Reading: Chapter 10 + 11
+
+## Markov Chain Monte Carlo
+
+-   We want independent random sa   mples, $\theta^{(s)}$ from
+    $p(\theta \mid y_1, ... y_n)$
+
+-   Generally hard to find efficient Monte Carlo methods with
+    independent samples
+
+-   Alternative, create a sequence of **correlated** samples that
+    converge to the posterior distribution
+
+## Discrete-state Markov Chains
+
+-   Let $\theta^{(t)} \in {1, 2, ... M}$ be the state space for the
+    stationary Markov Chain
+
+-   A sequence is called a markov chain if
+    $Pr(\theta^{(t+1)} = j \mid \theta^{(t)} = i, \theta^{(t-1)} = i_{t-1} ... \theta^{(1)}=i_1) = Pr(\theta^{(t+1)} \mid \theta^{(t)})$
+    for all $t \geq 0$
+
+-   $q_{ij} = Pr(\theta^{(t+1)} \mid \theta^{(t)})$ is the transition
+    probability from state $i$ to state $j$
+
+-   The *Markov property*: given the entire past history,
+    $\theta^{(1)}, ... \theta^{(t)}$, the most recent $\theta^{(t+1)}$
+    depends only on the immediate past, $\theta^{(t)}$
+
+<!-- - $p(\theta^{(s+1)} \mid \theta^{(1)}), \theta^{(2)})..., \theta^{(s)}) = p(\theta^{(s+1)} \mid \theta^{(s)})$  -->
+
+-   The $M \times M$ matrix $Q = (q_{ij})$ is called the *transition
+    matrix* of the Markov Chain
+
+## The Transition Matrix
+
+-   The $M \times M$ matrix $Q = (q_{ij})$ is called the *transition
+    matrix* of the Markov Chain
+
+<center>3-state example</center>
+
+$$Q = \begin{bmatrix}a_1 & a_2 & a_3 \\ b_1 & b_2 & b_3 \\ c_1 & c_2 & c_3 \end{bmatrix}$$
+
+-   The rows of the transition matrix sum to 1
+
+-   Note: $Q^n = (q^{(n)}_{ij})$ is is the probability of
+    transitionining from $i$ to $j$ in $n$ steps
+
+-   A Markov Chain is called *regular* if for some $n$, $Q^n_{ij} > 0$ for all $i,j$). E.g.it is possible to go from $i$ to $j$ in a finite number of step).
+
+
+
+## The limiting distribution
+
+-  *The limiting distribution* is $\pi_j = lim_{n \to \infty} Q_{ij}^n > 0$ independent of the starting point $i$.
+
+-   A regular Markov chain has a *limiting probability
+    distribution.
+
+-   The limiting distribution of a regular transition matrix is the unique nonnegative solution to the equation $\pi Q = \pi$ 
+    - This is called the *stationary distribution*
+    - Does depend on where the chain starts
+
+## Markov Chain Example {.smaller}
+
+-   Sociologists often study social mobility using a Markov chain.
+
+-   In this example, the state space if {low income, middle income, and
+    high income} of families
+
+-   Let $\mathbf{Q}$ be the transition matrix from parents income to
+    childrens income:
+
+```{=tex}
+\begin{array}{ l |l l| } & 
+{ \text { Lower } } & { \text { Middle } } & { \text { Upper } } \\ 
+\hline
+{ \text { Lower } } & { 0.40 } & { 0.50 } & { 0.10 } \\ 
+{ \text { Middle } } & { 0.05 } & { 0.70 } & { 0.25 } \\ 
+{ \text { Upper } } & { 0.05 } & { 0.50 } & { 0.45 } \end{array}
+```
+## Multi-step Transition Probabilities
+
+<center>2-step transition probabilities</center>
+
+$$\mathbf { Q } ^ { 2 } = \mathbf { Q } \times \mathbf { Q } = \left| \begin{array} { l l l } { 0.1900 } & { 0.6000 } & { 0.2100 } \\ { 0.0675 } & { 0.6400 } & { 0.2925 } \\ { 0.0675 } & { 0.6000 } & { 0.3325 } \end{array} \right|$$
+
+<center>4-step transition probabilities</center>
+
+$$\mathbf { Q } ^ { 4 } = \mathbf { Q } ^ { 2 } \times \mathbf { Q } ^ { 2 } = \left| \begin{array} { l l l } { 0.0908 } & { 0.6240 } & { 0.2852 } \\ { 0.0758 } & { 0.6256 } & { 0.2986 } \\ { 0.0758 } & { 0.6240 } & { 0.3002 } \end{array} \right|$$
+
+## Multi-step Transition Probabilities
+
+<center>4-step transition probabilities</center>
+
+$$\mathbf { Q } ^ { 4 } = \mathbf { Q } ^ { 2 } \times \mathbf { Q } ^ { 2 } = \left| \begin{array} { l l l } { 0.0908 } & { 0.6240 } & { 0.2852 } \\ { 0.0758 } & { 0.6256 } & { 0.2986 } \\ { 0.0758 } & { 0.6240 } & { 0.3002 } \end{array} \right|$$
+
+<center>8-step transition probabilities</center>
+
+$$\mathbf { Q } ^ { 8 } = \mathbf { Q } ^ { 4 } \times \mathbf { Q } ^ { 4 } = \left| \begin{array} { c c c } { 0.0772 } & { 0.6250 } & { 0.2978 } \\ { 0.0769 } & { 0.6250 } & { 0.2981 } \\ { 0.0769 } & { 0.6250 } & { 0.2981 } \end{array} \right|$$
+
+## The stationary distribution
+
+$$\mathbf { Q } ^ { \infty } = \left(\begin{array}{c}1\\ 1\\ 1 \end{array}\right)\pi = \left| \begin{array} { c c c } { \pi_1 } & { \pi_2 } & { \pi_3 } \\ { \pi_1 } & { \pi_2 } & { \pi_3 } \\ { \pi_1 } & { \pi_2 } & { \pi_3 } \end{array} \right|$$
+
+```{r, echo=TRUE}
+Q <- matrix(c(0.4, 0.05, 0.05, 
+              0.5, 0.7, 0.5, 
+              0.1, 0.25, 0.45), ncol=3)
+p <- eigen(t(Q))$vectors[, 1]
+stationary_probs <- p/sum(p)
+stationary_probs
+stationary_probs %*% Q
+```
+
+## Markov Chain Monte Carlo
+
+-   Incredible idea: create a Markov Chain with the desired limiting
+    distribution
+
+    -   Want the limiting distribution to be the posterior distribution
+
+-   Unlike the previous examples, we will mostly work with *infinite*
+    state space
+
+-   Want $p(\theta^{(t+1)} \mid \theta^{(t)})$ to have limiting
+    distribution $p(\theta \mid y)$
+
+    -   If we run the random walk for long enough, $\theta^{(t)}$ will
+        be distributed approximately according to $p(\theta \mid y)$
+
+## Detailed Balance
+
+-   Assume a Markov Chain $\theta_t$, with stationary distribution
+    $\pi(s)$, and let
+    $$p(s, s') = Pr(\theta_{t+1}=s \mid \theta_{t}=s')$$
+
+The chain is said to be reversible with respect to $\pi$ or to satisfy
+detailed balance with respect to $\pi$ if
+
+$$\pi(s') p(s, s')=\pi(s) p(s',s) \quad \forall s, s'$$ 
+
+## Detailed Balance
+
+-   If $\pi(s)$ and $p(s, s')$ satisfy detailed balance then $\pi$ is
+    the unique stationary distribution of the Markov Chain.
+
+-   Goal: devise a transition kernel $p(s, s')$ for which
+    $\pi(\theta=s \mid y) = \pi(s)$ satisfies detailed balance
+
+-   Detailed balance is a stronger condition than required for a stationary distribution
+
+## Monte Carlo CLT {.smaller}
+
+-   Reminder: $\overline{\theta} = \sum_{s = 1}^{S}\theta^{( s )}/S$ and
+    $S$ is the number of samples.
+
+-   If the samples are independent,
+    $$p(\overline{\theta}) \to  N\left(\theta, \frac{\text{Var}(\theta \mid y_1, ... y_n)}{S}\right)$$
+
+-   If the samples are from a Markov Chain with $\theta_1$ from the
+    stationary distribution, then
+
+$$p(\overline{\theta}) \to  N\left(\theta, \frac{\overline \sigma^2}{S}\right)$$
+where
+$\overline \sigma^2 = Var(\theta \mid y_1, ... y_n) + 2 \sum_{s=1}^\infty Cov(\theta_1, \theta_s)$
+
+## The Independence Sampler {.smaller}
+
+1.  Initialize $\theta_0$ to be the starting point
+
+2.  Generate the candidate $\theta^*$ from a proposal distribution,
+    $J(\theta^*)$ which is indepednent of $\theta_t$
+
+3.  Compute
+    $r = \text{min}(1, \frac{p(\theta^* \mid y)}{p(\theta_t \mid y)})$
+
+4.  Set $\theta_{t + 1} \leftarrow \theta^*$ with probability $r$.
+
+-   Generate a uniform random number $u \sim Unif(0, 1)$
+-   If $u < r$ we accept $\theta^*$ as our next sample
+-   Else $\theta_{t + 1} \leftarrow \theta_t$ (we do not update the
+    sample this time)
+
+--- 
+
+### Intuition
+
+- If $p(\theta^* \mid y) > p(\theta_t \mid y)$ accept with probability 1
+  + The proposed sample has higher posterior density than the previous sample
+  + Always accept if we increase the posterior probability density
+- If $p(\theta^* \mid y) < p(\theta_t \mid y)$ accept with probability
+    $r < 1$
+  + Accept with probability less than 1 if probability density would decrease
+  + Relative frequency of $\theta^*$ vs $\theta_t$ in our samples
+        should be $\frac{p(\theta^* \mid y)}{p(\theta_t \mid y)}$
+
+--- 
+
+### An Example
+
+-   Let $P(\theta \mid y)$ be a Beta(5, 10) posterior distribution
+
+-   Propose from a distribution $J(\theta^*) \sim N(0.5, 1)$
+
+```{r, fig.width=5, fig.height=5, out.width="40%"}
+ggplot(data.frame(x = rnorm(100)), aes(x)) +
+  stat_function(fun = function(x) dbeta(x, 5, 10), aes(colour="Target"), size=1.5) +
+  stat_function(fun = function(x) dnorm(x, 0.5, 0.5), aes(colour="Proposal"), size=1.5) +
+  xlim(c(-1,2)) + 
+  theme_bw(base_size=16) + scale_color_manual("", values=rev(cols2)) + theme(legend.position=c(0.8, 0.8)) + 
+  geom_vline(xintercept=0) +  geom_vline(xintercept=1)
+```
+
+------------------------------------------------------------------------
+
+### Independence Sampler
+
+```{r "mc_indep", out.width="60%", fig.width=4, fig.height=4, cache=TRUE}
+library(coda)
+
+#Log posterior function.
+log_posterior <- Vectorize(function(theta){
+   if(theta <= 0 || theta >= 1){
+       return(-Inf)
+   } else
+       (4)*log(theta)  +(9)*log(1-theta)
+})
+
+##Random walk in theta space.
+indep_metrop <- function(rdist, theta_start, burnin, maxit){
+
+    theta_t <- theta_start
+    # Allocate space for results.
+    theta_out <- rep(NA, burnin + maxit)
+
+    # independent proposals
+    props <- rdist(burnin + maxit)
+    
+    # Accept/reject thresholds. We will do these in log-space, note that
+    # log(Unif) = -Expo.
+    thresh <- -rexp(burnin + maxit)
+    for(i in 1:(burnin + maxit)){
+        
+      ##Propose new theta. Note that the "conditioning" enters by shifting
+      ##the normal draw by theta.t.
+        theta_p <- props[i]
+        
+        ##Log-rejection ratio for symmetric proposal
+        l_metrop <- log_posterior(theta_p) - log_posterior(theta_t)
+
+        ##Accept reject step
+        theta_t <- if(l_metrop > thresh[i]) theta_p else theta_t
+        
+        ##Save the draw
+        theta_out[i] <- theta_t
+    }
+
+    ##Chop off the first part of the chain -- this reduces dependence on the starting point.
+    if(burnin == 0)
+      theta_out
+    else
+      theta_out[-(1:burnin)]
+}
+
+ indep_samples <- indep_metrop(function(n) rnorm(n, mean=0.5, sd=1), 1/2, 1e2, 1e4)
+seq_cols <- cols_sequential(5)
+plot(indep_samples[1:1e3], type="l", ylim=c(0, 1), ylab=expression(theta), xlab="Iteration", main="Sample vs time")
+abline(h=qbeta(c(0.025, 0.25, 0.75, 0.975), 5, 10), lty=2, col=seq_cols[c(2, 3, 3, 2)])
+
+```
+
+<center>Note and source of confusion: samples are correlated over time
+for the "independence sampler"</center>
+
+------------------------------------------------------------------------
+
+## Weighting by waiting
+
+```{r, dependson="mc_indep", warning=FALSE, cache=TRUE}
+indep_samples <- indep_metrop(function(n) rnorm(n, mean=0.5, sd=1), 1/2, 1e2, 1e5)
+
+tibble(counts=as.integer(table(indep_samples)), 
+       density = log_posterior(as.numeric(names(table(indep_samples))))) %>% ggplot(aes(y=counts, x=density)) + geom_point(col="blue", size=1/2) + xlab("log posterior density") + ylab("number of iterations") + ggtitle("log posterior density vs time spent at value") + theme_bw(base_size=16)
+
+```
+
+<center>Where did the sampler spend the most time? Where does it quickly
+leave?</center>
+
+------------------------------------------------------------------------
+
+### Independence Sampler
+
+```{r, dependson="mc_indep", warning=FALSE, out.width="70%", fig.width=4, fig.height=4}
+
+plot(density(indep_samples), col=cols2[2], lwd=2, main = "Monte Carlo vs True")
+curve(dbeta(x, 5, 10), add=TRUE, col=cols2[1], lwd=2)
+legend("topright", legend=c("Monte Carlo", "True"), col=rev(cols2), lty=1, cex=0.7)
+
+```
+
+## Metropolis Algorithm
+
+-   Let $p(\theta \mid y)$ be the posterior distribution
+
+-   The goal is to define a transition kernel,
+    $p(\theta_{t+1} \mid \theta_{t})$ such that $p(\theta \mid y)$ is
+    the stationary distribution for the proposal
+
+------------------------------------------------------------------------
+
+### The Metropolis Algorithm
+
+-   Generalize the independence sampler
+
+    -   $J(\theta^* \mid \theta_t) = J(\theta^*)$
+
+-   Metropolis: Allow the proposal distribution to depend on the most
+    recent sample
+
+    -   $J(\theta^* \mid \theta_t)$, e.g. $\theta^* \sim N(\theta_t, 1)$
+
+-   Metropolis sampler: a "moving" proposal distribution
+
+------------------------------------------------------------------------
+
+### The Metropolis Algorithm {.smaller}
+
+1.  Initialize $\theta_0$ to be the starting point for you Markov Chain
+
+2.  Choose a proposal distribution, $J(\theta^* \mid \theta_{t})$
+
+    -   Propose a candidate value for the next sample
+    -   Must have symmetry:
+        $J(\theta^* \mid \theta_t) = J(\theta_t \mid \theta^*)$
+
+3.  Generate the candidate $\theta^*$ from the proposal distribution,
+    $J$
+
+4.  Compute
+    $r = \text{min}(1, \frac{p(\theta^* \mid y)}{p(\theta_t \mid y)})$
+
+5.  Set $\theta_{t + 1} \leftarrow \theta^*$ with probability $r$: +
+    Generate a uniform random number $u \sim Unif(0, 1)$ + If $u < r$ we
+    accept $\theta^*$ as our next sample + Else
+    $\theta_{t + 1} \leftarrow \theta_t$ (we do not update the sample
+    this time)
+
+------------------------------------------------------------------------
+
+### Metropolis-Hastings Algorithm
+
+-   The Metropolis-*Hastings* algorithm allows us to use non-symmetric
+    proposals
+
+-   The Hastings correction is needed when
+    $J(\theta^* \mid \theta_t) \neq J(\theta^t \mid \theta^*)$
+
+$$r =  \text{min}(1, \frac{p(\theta^* \mid y)}{p(\theta_t \mid y)}\frac{J(\theta^t \mid \theta^*)}{J(\theta^* \mid \theta_t)})$$
+
+-   For symmetric proposals
+    $\frac{J(\theta^t \mid \theta^*)}{J(\theta^* \mid \theta_t)}= 1$
+
+------------------------------------------------------------------------
+
+### Detailed     Balance Proof
+
+------------------------------------------------------------------------
+
+### Aside: Arianna Rosenbluth
+
+```{r}
+knitr::include_graphics("images/AriannaRosenbluth.jpeg")
+```
+
+<https://en.wikipedia.org/wiki/Arianna_W._Rosenbluth>
+
+------------------------------------------------------------------------
+
+### An Example
+
+-   Let $P(\theta \mid y)$ be a Beta(5, 10) posterior distribution
+
+-   1-d sampling: lets try sampling from the Beta using the Metropolis
+    algorithm
+
+-   Initialize $\theta_0$ to 0.9
+
+    -   Note that the probability of drawing a value larger than 0.9
+        from a Beta(5, 10) is smaller than 1e-8
+
+    -   Our initial value is far from the high posterior density
+
+    -   In the long run this won't matter
+
+-   Define transition kernel $J(\theta_{t+1} \mid \theta_{t})$ as
+    $\theta^* \sim N(\theta_t, \tau^2)$
+
+    -   How does choice of $\tau^2$ effect performance of MC sampler?
+
+---
+class: middle, center, inverse;
+background-image: none;
+
+### Demo
+---
+
+```{r rw_metrop, cache=TRUE}
+library(coda)
+
+#Log posterior function.
+log_posterior <- function(theta){
+   if(theta <= 0 || theta >= 1){
+       return(-Inf)
+   } else
+       (5-1)*log(theta)  +(10-1)*log(1-theta)
+}
+
+## Random walk in theta space.
+rw_metrop <- function(theta_0, burnin, maxit, scale=0.25){
+
+    # Initialize parameters.
+    theta_t <- theta_0
+    # Allocate space for results.
+    theta_out <- rep(NA, burnin + maxit)
+
+    # We can draw all of our proposals at once_
+    # In general, if you can get away with it, drawing a bunch of random variables
+    # at once is much faster than drawing them one as a time.
+    props <- rnorm(burnin + maxit)*scale
+    
+    # Accept/reject thresholds. We will do these in log-space, note that
+    # log(Unif) = -Expo.
+    thresh <- -rexp(burnin + maxit)
+    for(i in 1:(burnin + maxit)){
+        
+      ## Propose new theta. Note that the "conditioning" enters by shifting
+      ## the normal draw by theta.t.
+        theta_p <- theta_t + props[i]
+        
+        ## Log-rejection ratio for symmetric proposal
+        
+        l_metrop <- log_posterior(theta_p) - log_posterior(theta_t)
+
+        ## Accept reject step
+        theta_t <- if(l_metrop > thresh[i]) theta_p else theta_t
+        
+        ## Save the draw
+        theta_out[i] <- theta_t
+    }
+
+    ## Chop off the first part of the chain -- this reduces dependence on the starting point.
+    if(burnin == 0)
+      theta_out
+    else
+      theta_out[-(1:burnin)]
+}
+
+```
+
+```{r "beta_mc", dependson="rw_metrop", cache=TRUE}
+
+## Standard random walk runs.
+## Step size too big.
+
+rw_large <- rw_metrop(0.9, 1e2, 1e3, 2)
+
+# Step size too small.
+rw_small <- rw_metrop(0.9, 1e2, 1e3, 0.01)
+
+# Step size around the right range.
+rw_mid <- rw_metrop(0.9, 1e2, 1e3, 0.1)
+
+
+```
+
+------------------------------------------------------------------------
+
+### Small variance proposal
+
+$\tau^2 = 0.01$ ("small" jump)
+
+```{r, dependson="beta_mc", out.width="30%", echo=TRUE}
+
+acf(rw_small, lag=100)
+print(sprintf("Effective sample size: %.2f, Rejection Rate: %.2f", 
+              effectiveSize(rw_small), rejectionRate(as.mcmc(rw_small))))
+
+```
+
+------------------------------------------------------------------------
+
+### Small variance proposal
+
+$\tau^2 = 0.01$ ("small" jump)
+
+```{r, dependson="beta_mc", out.width="70%", fig.width=4, fig.height=4}
+
+plot(density(rw_small), xlim=c(0, 1), main = "samples vs target", col=cols2[2], lwd=2)
+curve(dbeta(x, 5, 10), add=TRUE, col=cols2[1], lwd=2)
+```
+
+------------------------------------------------------------------------
+
+### The Metropolis Algorithm
+
+$\tau^2 = 0.1$ ("medium" proposal variance)
+
+```{r, dependson="beta_mc", echo=TRUE, out.width="40%"}
+acf(rw_mid, lag=50)
+print(sprintf("Effective sample size: %.2f, Rejection Rate: %.2f", 
+              effectiveSize(rw_mid), rejectionRate(as.mcmc(rw_mid))))
+```
+
+------------------------------------------------------------------------
+
+### The Metropolis Algorithm
+
+$\tau^2 = 0.1$ ("medium" proposal variance)
+
+```{r dependson="beta_mc", fig.height=4, fig.width=4, out.width="70%"}
+plot(density(rw_mid), xlim=c(0, 1), main = "samples vs target", sub="(moderate proposal variance)", col=cols2[2], lwd=2)
+curve(dbeta(x, 5, 10), add=TRUE, col=cols2[1], lwd=2)
+```
+
+------------------------------------------------------------------------
+
+### The Metropolis Algorithm
+
+$\tau^2 = 2$ ("large" jump)
+
+```{r, dependson="beta_mc", echo=TRUE, out.width="40%"}
+acf(rw_large, lag=50)
+print(sprintf("Effective sample size: %.2f, Rejection Rate: %.2f", 
+              effectiveSize(rw_large), rejectionRate(as.mcmc(rw_large))))
+```
+
+------------------------------------------------------------------------
+
+### The Metropolis Algorithm
+
+$\tau^2 = 2$ ("large" proposal variance)
+
+```{r dependson="beta_mc", fig.height=4, fig.width=4, out.width="70%"}
+plot(density(rw_large), xlim=c(0, 1), main = "samples vs target", sub="(large proposal variance)", col=cols2[2], lwd=2)
+curve(dbeta(x, 5, 10), add=TRUE, col=cols2[1], lwd=2)
+```
+
+------------------------------------------------------------------------
+
+### Small, Moderate and Large Proposal variance
+
+```{r, dependson="beta_mc", out.width="50%", fig.width=6, fig.height=8}
+all_samples <- tibble(big_jump = rw_large, small_jump = rw_small, moderate_jump = rw_mid)
+plot(as.mcmc(all_samples))
+```
+
+------------------------------------------------------------------------
+
+### 10,000 Samples
+
+```{r, dependson="beta_mc", out.width="85%", fig.width=6, fig.height=3, cache=TRUE}
+r1 <- rw_metrop(0.5, 1e2, 1e4, 2)
+
+# Step size too small.
+r2 <- rw_metrop(0.5, 1e2, 1e4, 0.01)
+
+# Step size around the right range.
+r3 <- rw_metrop(0.5, 1e2, 1e4, 0.1)
+
+par(mfrow=c(1, 3))
+
+plot(density(r2), xlim=c(0, 1), ylim=c(0, 8), main = "small jump", col=cols2[1], lwd=2)
+curve(dbeta(x, 5, 10), add=TRUE, col=cols2[2], lwd=2)
+plot(density(r3), xlim=c(0, 1), ylim=c(0, 8), main = "moderate jump", col=cols2[1], lwd=2)
+curve(dbeta(x, 5, 10), add=TRUE, col=cols2[2], lwd=2)
+plot(density(r1), xlim=c(0, 1), ylim=c(0, 8), main = "large jump", col=cols2[1], lwd=2)
+curve(dbeta(x, 5, 10), col=cols2[2], add=TRUE, lwd=2)
+
+print(sprintf("Effective sample size (small proposal variance): %.2f", as.numeric(effectiveSize(r2))))
+print(sprintf("Effective sample size (medium proposal variance): %.2f", as.numeric(effectiveSize(r3))))
+print(sprintf("Effective sample size (large proposal variance): %.2f", as.numeric(effectiveSize(r1))))
+
+```
+
+------------------------------------------------------------------------
+
+### MCMC diagnostics
+
+-   Diagnose the chain(s) performance by examining:
+
+    -   Rejection rate
+
+    -   Autocorrelation
+
+    -   Effective sample size
+
+    -   Rhat
+
+------------------------------------------------------------------------
+
+### MCMC diagnostics
+
+-   **Rejection rate**: if rejection rate is high, the proposal density
+    is proposing "too far away" from the current sample
+
+-   Means we are often keeping the previous sample
+
+-   Sampler is "sticky". Traceplots look like cityscapes.
+
+------------------------------------------------------------------------
+
+## MCMC diagnostics
+
+-   **Autocorrelation**: if samples are highly correlated, the proposal
+    density is proposing "too close" to the current sample
+
+    -   Highly correlated implies the Markov chain is mixing slowly
+
+-   The mixing time of a Markov chain is the time until the Markov chain
+    is "close" to its limiting distribution.
+
+## MCMC diagnostics
+
+-   **Effective sample size:** correlated chain of samples is equivalent
+    to this number of independent samples
+
+    -   High rejection rate implies a lot of duplicate samples so
+        effective size is smaller than number of iterations
+
+    -   High autocorrelation means neighboring samples are very similar
+        (even if not exactly the same)
+
+Reminder:
+$\overline \sigma^2 = Var(\theta \mid y_1, ... y_n) + 2 \sum_{s=1}^\infty Cov(\theta_1, \theta_s)$
+
+<center>$n_{\mathrm{eff}}=\frac{m n}{1+2 \sum_{t=1}^{\infty} \rho_t}$</center>
+
+## Metropolis Algorithm
+
+-   In the Beta example, the accept ratio,
+    $\text{min}(1, \frac{p(\theta^* \mid y)}{p(\theta_t \mid y)})$ is
+    zero when $\theta^* > 1$ or $\theta^* < 0$
+
+-   If $\tau^2$ (proposal variance) too large, you will often reject
+    your proposal
+
+    -   Proposing far from your current location may move you too far
+        out of the high density areas
+
+    -   This makes for a "sticky" chain (stay at current sample for a
+        long time)
+
+-   $\tau^2$ too small, the chain explore the parameter space slowly
+
+------------------------------------------------------------------------
+
+## Rhat
+
+-   Important to assess convergence by checking whether the chains "mix"
+
+-   Visual check: look at traceplots of multi-chains
+
+-   Quantitative check: look at within- and between- chain variation
+
+## Rhat
+
+- Assume $m$ chains and $n$ draws per chain
+
+-   Let $B=\frac{1}{m-1} \sum_{j=1}^m\left(\bar{\theta}_{. j}-\bar{\theta}_{. .}\right)^2$
+    be the between chain variance
+
+-   Let $W=\frac{1}{m} \sum_{j=1}^m s_j^2$ be the average within chain
+    variance
+
+Then we define $\widehat{\operatorname{var}}^{+}(\psi \mid y)=\frac{n-1}{n} W+B$ and the Rhat as $\widehat{R}=\sqrt{\frac{\widehat{\operatorname{var}}^{+}(\psi \mid y)}{W}} = \sqrt{1 + B/W}$
+
+# Demo: Metropolis-Hastings
+
+## The Metropolis Algorithm
+
+```{r, dependson="beta_mc", out.width="50%", echo=TRUE}
+
+acf(r1, lag=50)
+print(sprintf("Effective sample size: %.2f, Rejection Rate: %.2f", 
+              effectiveSize(r1), rejectionRate(as.mcmc(r1))))
+
+```
+
+## Computational Considerations
+
+-   For very small values of $p(\theta \mid y)$, numerical underflow is
+    a problem
+
+-   Can resolve this by working on the log scale
+
+```{r, echo=TRUE}
+dnorm(1000) / dnorm(1001)
+dnorm(1000, log=TRUE) - dnorm(1001, log=TRUE)
+```
+
+-   Compute
+    $l = \text{min}(0, \text{log}(p(\theta^* \mid y)) - \text{log}(p(\theta_t \mid y)))$
+
+-   If $\text{log}(u) < l$ we accept $\theta^*$ as our next point
+
+## MCMC in the normal model
+
+-   Modeling wing length of different specifies of midge (small,
+    two-winged flies)
+
+-   Reminder: $Y_i \sim N(\mu, \sigma^2)$
+
+-   $P(\mu \mid \sigma^2)$,
+    $\mu \sim N(\mu_0, \frac{\sigma^2}{\kappa_0})$
+
+-   $P(\sigma^2), \sigma^2 \sim \text{Inv-Gamma}(\nu_0/2, \nu_0/2\sigma^2_0)$
+
+-   Parameterize in terms of $\theta = (\mu, \text{log}(\sigma))$? Why
+    parameterize this way?
+
+-   Let
+    $J(\theta^* \mid \theta_t) = N\left( \left(\begin{array}{c}\mu^{(t)} \\ \text{log}(\sigma^{(t)})\end{array}\right), \left(\begin{array}{c c} 0.5 & 0\\ 0 & 0.5 \end{array} \right)\right)$
+
+## MCMC in the normal model
+
+Example: midge wing length
+
+-   Modeling wing length of different specifies of midge (small,
+    two-winged flies)
+
+-   From prior studies: mean wing length close to 1.9mm with sd close to
+    0.1mm
+
+-   $\mu_0 = 1.9$, $\sigma^2_0 = 0.01$
+
+-   Choose $\kappa_0 = \nu_0 = 1$
+
+-   $(\bar y, s^2) = (1.804, 0.0169)$
+
+-   We will run 2 separate chains at different starting locations
+
+## MCMC in the normal model
+
+```{r "midge_mcmc", cache=TRUE, echo=FALSE}
+
+## prior mean for mu and prior counts for mu
+mu0 <- 1.9
+k0 <- 1
+
+## prior mean for variance and prior counts for variance
+s20 <- 0.010
+nu0 <- 1
+
+## sufficient statistics are sample mean and sample variance
+y <- c(1.64, 1.7, 1.72, 1.74, 1.82, 1.82, 1.82, 1.9, 2.08)
+n <- length(y)
+ybar <- mean(y)
+s2 <- var(y)
+
+## posterior parameters
+kn <- k0 + n
+nun <- nu0 + n
+mun <- (k0 * mu0 + n * ybar) / kn
+s2n <- (nu0*s20 + (n-1)*s2  + k0*n / kn * (ybar - mu0)^2) / nun
+
+## theta is the mean and log-variance
+log_normal_density <- function(theta) {
+
+  mu <- theta[1]
+  prec <- exp(theta[2])
+  dnorm(mu, mun, sqrt(1/prec / kn), log=TRUE) + dgamma(prec, nun/2, nun*s2n/2, log=TRUE)
+
+}
+
+normal_posterior <- function(theta) {
+  mu <- theta[1]
+  v <- 1/theta[2]
+  prod(dnorm(y, mu, sqrt(v))) * 
+    dnorm(mu, mu0, sqrt(v/k0)) * 
+    dgamma(1/v, nu0/2, nu0/2*s20)
+}
+
+#Random walk in theta space.
+rw_metrop_multi <- function(theta_0, burnin, maxit, taus=c(0.25, 0.25)){
+
+    ## Initialize parameters.
+    theta_t <- theta_0
+    ## Allocate space for results.
+    
+    theta_out <- matrix(NA, nrow=burnin+maxit, ncol=2, dimnames=list(NULL, c("mu", "prec")))
+
+    ## We can draw all of our proposals at once.
+    mu_props <- rnorm(burnin + maxit)*taus[1]
+    log_sigma_props <- rnorm(burnin + maxit)*taus[2]
+    
+    ## Accept/reject thresholds. We will do these in log-space, note that
+    thresh <- -rexp(burnin + maxit)
+    for(i in 1:(burnin + maxit)){
+
+        ## Propose new mu and sigma
+        theta_p <- c(theta_t[1] + mu_props[i], theta_t[2] + log_sigma_props[i])
+      
+        #First half of Log-rejection ratio
+        l_metrop <- log_normal_density(theta_p) - 
+          log_normal_density(theta_t) + 
+          (theta_p[2]) - (theta_t[2])
+        
+        
+        ##
+        theta_t <- if(l_metrop > thresh[i]) theta_p else theta_t
+        
+        ## Save the draw
+        theta_out[i, ] <- theta_t
+    }
+
+    #Chop off the first part of the chain -- this reduces dependence on the
+    #starting point assuming the burnin ends close to convergence.
+    
+    theta_out[-(1:burnin), ]
+
+}
+
+```
+
+```{r "tmp", eval=FALSE, echo=TRUE}
+
+#Random walk in theta space.
+rw_metrop_multi <- function(theta_0, burnin, maxit, taus=c(0.25, 0.25)){
+
+    ## Accept/reject thresholds. We will do these in log-space, note that
+    thresh <- -rexp(burnin + maxit)
+    theta_t <- theta_0
+    for(i in 1:(burnin + maxit)){
+
+        ## Propose new mu and sigma
+        theta_p <- c(theta_t[1] + mu_props[i], theta_t[2] + log_sigma_props[i])
+      
+        # Log-rejection ratio
+        l_metrop <- log_posterior(theta_p) - 
+          log_posterior(theta_t) 
+        ## Accept/reject step
+        theta_t <- if(l_metrop > thresh[i]) theta_p else theta_t
+        
+        ## Save the draw
+        theta_out[i, ] <- theta_t
+    }
+    #Chop off the first part of the chain -- this reduces dependence on the
+    #starting point assuming the burnin ends close to convergence.
+    theta_out[-(1:burnin), ]
+}
+
+```
+
+
+# Demo: MCMC for the normal model
+
+## MCMC for multivariate distributions
+
+```{r, dependson="midge_ani1", out.width="100%", warning=FALSE}
+library(patchwork)
+
+##Sample using MCMC
+nsamps <- 4e4
+res1 <- rw_metrop_multi(c(0, 6), 0, nsamps, c(0.5, 0.5))
+res2 <- rw_metrop_multi(c(10, 4), 0, nsamps, c(0.5, 0.5))
+
+res <- as_tibble(rbind(res1, res2))
+res$chain <- factor(rep(c("chain1", "chain2"), each=nsamps-1))
+
+views <- tibble(xmin = c(0, 1.5), 
+                xmax = c(10, 2), 
+                ymin = c(0, 0.0), 
+                ymax = c(300, 150))
+
+contour_dat <- as_tibble(expand.grid(seq(1.5, 2, by=0.01), seq(1, 150, by=1)))
+contour_dat$density <- apply(mutate(Var2=log(Var2), .data=contour_dat), 1, function(x) exp(log_normal_density(x)))
+
+mu_plot <- tibble(index = rep(1:nrow(res1), 2), mu=res$mu, prec=exp(res$prec), chain=res$chain) %>% 
+  filter(index <= 2000) %>%
+  ggplot(aes(x=index, y=mu, col=chain)) + 
+  geom_line() + theme_bw(base_size=16) + xlab("Iteration") + ylab(expression(mu)) + theme(legend.position = "none") + ylim(c(1, 3))
+
+precision_plot <- tibble(index = rep(1:nrow(res1), 2), mu=res$mu, prec=exp(res$prec), chain=res$chain) %>% 
+  filter(index <= 2000) %>%
+  ggplot(aes(x=index, y=prec, col=chain)) + 
+  geom_line() + theme_bw(base_size=16) + xlab("Iteration") + ylab(expression(1/sigma^2)) 
+
+mu_plot + precision_plot
+
+
+```
+
+## MCMC for multivariate distributions
+
+-   We will run 2 separate chains at different starting locations
+
+-   For chain 1:
+    $J(\theta^* \mid \theta_t) = N\left( \left(\begin{array}{c}\mu^{(t)} \\ \text{log}(\sigma^{(t)})\end{array}\right), \left(\begin{array}{c c} 1 & 0\\ 0 & 1 \end{array} \right)\right)$
+
+-   For chain 2:
+    $J(\theta^* \mid \theta_t) = N\left( \left(\begin{array}{c}\mu^{(t)} \\ \text{log}(\sigma^{(t)})\end{array}\right), \left(\begin{array}{c c} 0.1 & 0\\ 0 & 0.1 \end{array} \right)\right)$
+
+## MCMC for multivariate distributions
+
+```{r trace2, dependson="midge_ani2", out.width="100%", warning=FALSE}
+library(patchwork)
+
+mu_plot <- tibble(index = rep(1:nrow(res1), 2), mu=res$mu, prec=exp(res$prec), chain=res$chain) %>% 
+  filter(index <= 2000) %>%
+  ggplot(aes(x=index, y=mu, col=chain)) + 
+  geom_line() + theme_bw(base_size=16) + xlab("Iteration") + ylab(expression(mu)) + theme(legend.position = "none")
+
+precision_plot <- tibble(index = rep(1:nrow(res1), 2), mu=res$mu, prec=exp(res$prec), chain=res$chain) %>% 
+  filter(index <= 2000) %>%
+  ggplot(aes(x=index, y=prec, col=chain)) + 
+  geom_line() + theme_bw(base_size=16) + xlab("Iteration") + ylab(expression(1/sigma^2))
+
+mu_plot + precision_plot
+
+```
+
+## MCMC for multivariate distributions
+
+```{r, dependson="trace2", out.width="50%", warning=FALSE}
+#| slide:
+results <- tibble(index = rep(1:nrow(res1), 2), mu=res$mu, prec=exp(res$prec), chain=res$chain) 
+
+results %>% 
+  filter(index > 2000) %>% 
+  ggplot(aes(x=mu, y=prec, col=chain)) + 
+  geom_point() + 
+  geom_contour(data=contour_dat, aes(x=Var1, y=Var2, z=density), col="black") +
+  theme_bw(base_size=16) + 
+  xlab(expression(mu)) + ylab(expression(1/sigma^2))
+
+results %>% group_by(chain) %>% summarise(EF_mu = effectiveSize(mu), EF_prec = effectiveSize(prec)) 
+
+```
+
+## Metropolis Sampling
+
+<center>Try out the Metropolis algorithm at:</center>
+
+<br> <br>
+
+<center><https://chi-feng.github.io/mcmc-demo/app.html></center>
+
+<br> <br>
+
+-   Choose "Random Walk MH" algorithm
+
+-   Experiment by sampling from different target distribution
+
+-   Try different proposal variances by changing "Proposal $\sigma$"
+
+
+## Difficulties with MCMC
+
+-   Modern models often have *many* parameters. Large models pose a
+    challenge for MCMC.
+
+-   When there are thousands or more parameters
+
+    -   MCMC may take a long time to conververge to the stationary
+        distribution
+
+    -   In Metropolis-Hastings we have many tuning parameters for the
+        proposal distribution
+
+    -   Gibbs sampling has no tuning parameters, but does not work well
+        for highly correlated posterior distributions
+
+-   In general, MCMC is very slow relative to optimization methods
+
+------------------------------------------------------------------------
+
+### Hamiltonian Monte Carlo
+
+-   A clever parameter expansion strategy for MCMC
+
+-   Imagine a particle on a frictionless surface. The location of the
+    marble is the current value of $\theta_t$
+
+-   The negative posterior density is the "height" of the surface
+
+-   Each iteration we flick the marble with some velocity in a random
+    direction. This imparts the marble which momentum (an additional
+    parameters)
+
+-   Important caveat: cannot be applied with discrete parameters!
+
+------------------------------------------------------------------------
+
+### HMC
+
+-   For Metropolis-Hastings we only need to be able to evaluate the
+    posterior at each location
+
+-   For HMC we need the gradient (derivative) of the posterior as well
+
+-   In physics the Hamiltonian is the sum of the kinetic energies, plus
+    the potential energy of the particles
+
+    -   As our proposal, we randomly sample a momentum for the particle
+        and update its position accordingly
+
+    -   Can think of HMC as the MH algorithm with a very clever
+        jumping/proposal rule
+
+------------------------------------------------------------------------
+
+## HMC
+
+-   For each parameter $\theta_j$ in your target space, HCM adds a
+    'momentum' variable $\phi_j$
+
+-   Both $\theta$ and $\phi$ are updated together in a new Metropolis
+    algorithm
+
+-   $p(\theta, \phi \mid y)=p(\phi) p(\theta \mid y)$
+
+-   In additional to the log posterior, HMC also requires the
+    **gradient** of the log-posterior density.
+
+-   $\phi$ is usually given a $N_d(0, M)$ distribution, where $M$ is
+    typically chosen to be diagonal
+
+## HMC {.smaller}
+
+Equations of motion of the Hamiltonian, $H(\theta, \phi)$, described by
+partial derivatives:
+
+```{=tex}
+\begin{aligned}
+\frac{d \theta_{i}}{d t} &=\frac{\partial H}{\partial \phi_{i}} \\
+\frac{d \phi_{i}}{d t} &=-\frac{\partial H}{\partial \theta_{i}}
+\end{aligned}
+```
+where $$H(\theta, \phi)=U(\theta)+K(\phi)$$
+
+- $U(\theta)$ is the
+potential energy ($-log p(\theta \mid y)$)
+- $K(\phi)$ is the kinetic energy, usually $K(\phi)=\phi^{T} M^{-1} \phi / 2$
+
+## Some key Properties
+
+-   Hamiltonian Dynamics are reversible
+
+-   Dynamics keeps the Hamiltonian invariant, i.e. $dH/dt = 0$.
+
+    -   Acceptance probability of $1$ if we can simulate dynamics
+        exactly!
+
+## HMC Intuition
+
+```{r}
+
+mixture_density <- function(x, y) {
+  (1/2*dnorm(x, -2,) + 1/2*dnorm(x, 2)) * dnorm(y, sd=2)
+}
+
+ggplot() + 
+  ggdensity::geom_hdr_lines_fun(fun=mixture_density, xlim=c(-8, 8), ylim=c(-8, 8)) + 
+  theme_bw(base_size=16) + xlab(expression(theta)) + ylab(expression(phi))
+
+```
+
+## HMC
+
+-   Initialize parameters $\theta_0$
+
+-   For t in 1:T:
+
+    1.  Draw $\phi_t \sim N_d(0, M)$
+
+    2.  Update $\theta_t$ according to the Hamiltonian dynamics for a
+        fixed amount of time
+
+    3.  Take the $\theta_t$ as the new sample
+
+Problem: usually the Hamiltonian dynamics can't be solved exactly
+
+## The Leapfrog Algorithm
+
+-   If we could simulate the Hamiltonian dynamics exactly then we'd
+    accept every proposed sample
+
+-   We can't. Numericaly approximate the dynamics with the "Leapfrog
+    Algorithm"
+
+-   For the HMC we have to fix $L$ and $\epsilon$. $L\epsilon$ is the
+    length of time that we simulate the dynamics.
+
+-   For numerical approximation, repeat L times:
+
+    1.  $\phi \leftarrow \phi+\frac{1}{2} \epsilon \frac{d \log p(\theta \mid y)}{d \theta}$
+
+    2.  $\theta \leftarrow \theta+\epsilon M^{-1} \phi$
+
+    3.  $\phi \leftarrow \phi+\frac{1}{2} \epsilon \frac{d \log p(\theta \mid y)}{d \theta}$
+
+## The Full HMC Algorithm
+
+Initialize $\theta_0$ and for each iteration:
+
+1.  Set $\theta^* \leftarrow \theta_{t-1}$ and set $\phi^* \leftarrow \phi^{t-1} \sim N_d(0, M)$
+
+2.  For L iterations:
+
+    1.  $\phi^* \leftarrow \phi^*+\frac{1}{2} \epsilon \frac{d \log p(\theta^* \mid y)}{d \theta}$
+    2.  $\theta^* \leftarrow \theta^*+\epsilon M^{-1} \phi^*$
+    3.  $\phi^* \leftarrow \phi^*+\frac{1}{2} \epsilon \frac{d \log p(\theta^* \mid y)}{d \theta}$
+
+3.  $\theta_t \leftarrow \theta^*$ with probability
+    $r = \text{min}(1, \frac{p(\theta^* \mid y)p(\phi^*)}{p(\theta_{t-1} \mid y)p(\phi_{t-1})})$
+
+## HMC
+
+Try out HMC at:
+
+<https://chi-feng.github.io/mcmc-demo/app.html>
+
+-   Choose "HamiltonianMC" algorithm
+
+-   Experiment by sampling from different target distributions
+
+-   Compare to the Random Walk Metropolis
+
+## Paramter tuning
+
+HMC can be tuned in three places:
+
+1.  the probability distribution for the momentum variables $\phi$
+    (which, in our implementation requires specifying the diagonal
+    elements of a covariance matrix, that is, a scale parameter for each
+    of the d dimensions of the parameter vector),\
+2.  the scaling factor $\epsilon$ of the leapfrog steps,
+3.  the number of leapfrog steps L per iteration.
+
+------------------------------------------------------------------------
+
+### No-U-Turn Sampling and Stan
+
+-   The No-U-Turn Sampler (NUTS) automatically determines how long to
+    simulate the Hamiltonian dynamics
+
+-   NUTS is implemented in probabilistic programming langauges:
+
+    -   Stan
+    -   PyMC
+    -   Numpyro
+
+-   PPLs make inference more or less automatic
+
+    -   Syntax for specifying a probabilistic model
+    -   The PPL generates internal functions for evaluating the
+        posterior and it's gradient
+
+## Stan
+
+
+### Normal Model
+
+```{r}
+y <- c(1.64, 1.7, 1.72, 1.74, 1.82, 1.82, 1.82, 1.9, 2.08)
+n <- length(y)
+
+normal_mod <- cmdstanr::cmdstan_model("normal_model.stan")
+
+normal_samples <- normal_mod$sample(data=list(y=y, N=n, k0=1), iter_sampling = 1000, iter_warmup=1000)
+
+print(normal_samples)
+
+library(tidybayes)
+normal_samples %>% spread_draws(mu, sigma) %>%
+  ggplot() + geom_point(aes(mu, 1/sigma^2, 
+                            col=as.factor(.chain)), alpha=0.3) +
+  theme_bw()
+
+shinystan::launch_shinystan(normal_samples)
+
+```
+
+
+
+### Tips, tricks and diagnostics
+
+-   $\hat R$ statistics
+
+-   Divergences
+
+-   Shinystan
+
+## Divergences
+
+-   Divergences occur when the simulated Hamiltonian trajectory departs
+    from the true trajectory (leapfrog isn't accurate)
+
+-   Sometimes it helps to reduce the step size or increase acceptance
+    rate (`adapt_delta`)
+
+-   Reparameterization can be very helpful!
+
+## Example: Neal's Funnel
+
+-   Exemplifies the difficulties of sampling from some hierarchical
+    models
+
+-   The probability contours are shaped like ten-dimensional funnels.
+
+```{r, out.width="70%"}
+ig("images/neals_funnel.png")
+```
+
+## Example: Neal's Funnel
+
+```{stan, echo=TRUE, output.var="neals.stan"}
+parameters {
+  real y;
+  vector[9] x;
+}
+model {
+  y ~ normal(0, 3);
+  x ~ normal(0, exp(y/2));
+}
+```
+
+## Neal's Funnel
+
+```{r, out.width="90%", results="hide"}
+library(tidybayes)
+library(patchwork)
+
+neals_funnel <- cmdstanr::cmdstan_model("neals_funnel.stan")
+
+```
+
+```{r}
+nf_res <- neals_funnel$sample()
+print(nf_res)
+
+shinystan::launch_shinystan(nf_res)
+```
+
+## Neal's Funnel
+
+```{stan, echo=TRUE, eval=TRUE, output.var="neals_funnel_reparam.stan"}
+parameters {
+  real y_raw;
+  vector[9] x_raw;
+}
+transformed parameters { // deterministic function of model parameters
+  real y;
+  vector[9] x;
+
+  y = 3.0 * y_raw;
+  x = exp(y/2) * x_raw;
+}
+model {
+  y_raw ~ std_normal(); // implies y ~ normal(0, 3)
+  x_raw ~ std_normal(); // implies x ~ normal(0, exp(y/2))
+}
+```
+
+## Neal's Funnel
+
+```{r neal_sampling, out.width="90%"}
+neals_funnel_reparam <- cmdstanr::cmdstan_model("neals_funnel_reparam.stan")
+nf_res <- neals_funnel$sample(refresh=0)
+nf_reparam_res <- neals_funnel_reparam$sample(refresh=0)
+
+ shinystan::launch_shinystan(nf_reparam_res)
+```
+
+## Neal's Funnel
+
+```{r, dependson="neal_sampling"}
+nf_res %>% spread_draws(x[i], y) %>% 
+  filter(i==1) %>%
+  ggplot() + geom_point(aes(x=x, y=y, col=as.factor(.chain)), alpha=0.5) + 
+  theme_bw(base_size=16) + ylim(c(-10, 10)) + xlim(c(-200, 200)) + theme(legend.position = "none") -> neal_plot
+
+
+nf_reparam_res %>% spread_draws(x[i], y) %>% 
+  filter(i==1) %>%
+  ggplot() + geom_point(aes(x=x, y=y, col=as.factor(.chain)), alpha=0.5) + labs(col="Chain") +
+  theme_bw(base_size=16) + ylim(c(-10, 10)) + xlim(c(-200, 200)) + theme(legend.position="top")-> reparam_plot
+
+neal_plot + reparam_plot
+
+## shinystan::launch_shinystan(nf_res)
+
+```
+
+## Neal's Funnel
+
+```{r}
+library(ggridges)
+library(tidybayes)
+nf_res %>% spread_draws(x[i], y) %>%
+  filter(i==1) %>%
+  ggplot() + geom_density_ridges(aes(x=y, y=as.factor(.chain)), alpha=0.5) + ggtitle("Naive parameterization") + 
+  ylab("Chain") +
+  theme_bw(base_size=16) + xlim(c(-10, 10)) -> ridges_naive
+
+nf_reparam_res %>% spread_draws(x[i], y) %>%
+  filter(i==1) %>%
+  ggplot() + geom_density_ridges(aes(x=y, y=as.factor(.chain)), alpha=0.5) + ggtitle("Reparameterization") +
+  ylab("Chain") + 
+  theme_bw(base_size=16) + xlim(c(-10, 10)) -> ridges_reparam
+
+ridges_naive + ridges_reparam
+
+
+nf_reparam_res %>% spread_draws(x_raw[i], y_raw) %>%
+  filter(i==1) %>%
+  ggplot() + geom_point(aes(x=x_raw, y=y_raw))
+
+```
+
+------------------------------------------------------------------------
+
+### Neal's Funnel
+
+Sampling in the reparameterzied space is *much* easier!!
+
+```{r}
+nf_reparam_res %>% spread_draws(x_raw[i], y_raw) %>%
+  filter(i==1) %>%
+  ggplot() + geom_point(aes(x=x_raw, y=y_raw, col=as.factor(.chain)), alpha=0.5) + 
+  theme_bw() 
+```
+
+
+## The Gibbs Sampler {.smaller}
+
+-   Suppose that the parameter vector $\theta$ can be divided into $d$
+    subvectors.
+
+-   For sample $s = 1, \dots, S$:
+
+    -   For $j \in 1, \dots, d$
+
+        -   Draw a value from the conditional distribution of $\theta_j$
+            given all the other parameters,
+            $$\theta_{j}^s \sim p(\theta_j | \theta_{-j}^{(s-1)}, y),$$
+            where $\theta_{-j}$ consists of updated
+            parameters for all parameters preceding $j$ and the previous iteration's values for all succeeding parameters,
+            $$\theta_{-j}^{s - 1} = \left(\theta_1^s, \dots, \theta_{s - 1}^t, \theta_{j - 1}^{s - 1}, \dots, \theta_d^{s - 1}\right).$$
+
+## The Gibbs Sampler
+
+-   To identify the full conditional distributions:
+    1.  Start with the full posterior
+    2.  For each parameter, $\theta_j$, remove all multiplicative factors which constant in $\theta_j$
+    3.  Identify the kernel of the resultant conditional density (or otherwise devise a strategy for sampling)
+
+## Gibbs Sampling the Normal Model 
+
+
+
+## The Gibbs Sampler
+
+-   Assume $p(\mu) \sim N(\mu_0, \tau^2)$ and
+    $\frac{1}{\sigma^2} \sim \text{Gamma}(a,b)$
+
+-   $p(\mu \mid \sigma^2, y)$ is a normal distribution (conjugacy)
+
+    -   Sample $\mu^{(s)} \sim \text{Normal}(\mu_n, \tau^2_n)$
+    -   $\tau^2_n = \frac{{\sigma^2}^{(s-1)}}{n + \kappa_0}$
+
+-   $p(\frac{1}{\sigma^2} \mid \mu, y)$ is a gamma distribution
+    (conjugacy)
+
+    -   Sample
+        $(\frac{1}{\sigma^2})^{(s)} \sim \text{Gamma}(a + n/2, b + \frac{\sum (d_i^{(s)})^2}{2} + \frac{\kappa_0}{2}(\mu^{(s)} - \mu_0)^2)$
+    -   $d_i^{(s)} = (y_i - \mu^{(s)})$ 
+
+```{r, gibbs_setup}
+
+## prior mean for mu and prior counts for mu
+mu0 <- 1.9
+k0 <- 1
+
+## prior mean for variance and prior counts for variance
+s20 <- 0.010
+nu0 <- 1
+
+## sufficient statistics are sample mean and sample variance
+y <- c(1.64, 1.7, 1.72, 1.74, 1.82, 1.82, 1.82, 1.9, 2.08)
+n <- length(y)
+ybar <- mean(y)
+s2 <- var(y)
+
+## posterior parameters
+kn <- k0 + n
+nun <- nu0 + n
+mun <- (k0 * mu0 + n * ybar) / kn
+s2n <- (nu0*s20 + (n-1)*s2  + k0*n / kn * (ybar - mu0)^2) / nun
+
+## Normal posterior parameterized using precision instead of variance
+normal_posterior <- Vectorize(function(mu, prec) {
+  v <- 1/prec
+  prod(dnorm(y, mu, sqrt(v))) * 
+    dnorm(mu, mu0, sqrt(v/k0)) * 
+    dgamma(1/v, nu0/2, nu0/2*s20)
+})
+
+
+grid <- as_tibble(expand.grid(seq(1.6, 2.0, by=0.001), 1/seq(0.005, 0.1, by=0.001)))
+
+colnames(grid) <- c("mu", "prec")
+
+nsamp <- 1000
+mu_samps <- numeric(nsamp)
+prec_samps <- numeric(nsamp)
+
+## initial values
+mu_cur <- 1.5
+prec_cur <- 2
+
+mu_samps[1] <- mu_cur
+prec_samps[1] <- prec_cur
+
+for(i in 2:nsamp) {
+  
+  mu_cur <- rnorm(1, mun, sqrt(1/prec_cur * 1/(k0 + n)))
+  prec_cur <- rgamma(1, n/2+1, sum((y - mu_cur)^2)/2 + k0/2*(mu_cur - mu0)^2) 
+
+  mu_samps[i] <- mu_cur
+  prec_samps[i] <- prec_cur
+                          
+}
+
+```
+
+## Gibbs Sampler
+
+```{r, echo=TRUE, eval=FALSE}
+
+gibbs <- function(mu_cur, prec_cur, burnin, maxit)
+
+  nsamp <- maxit + burnin
+  mu_samps <- numeric(nsamp)
+  prec_samps <- numeric(nsamp)
+  mu_samps[1] <- mu_cur
+  prec_samps[1] <- prec_cur
+  
+  for(i in 2:nsamp) {
+    ## Sample mu given current precision
+    mu_cur <- rnorm(1, mun, sqrt(1/prec_cur * 1/(k0 + n)))
+
+    ## Sample precision given current mu
+    prec_cur <- rgamma(1, n/2+1, sum((y - mu_cur)^2)/2 + k0/2*(mu_cur - mu0)^2)
+    
+    mu_samps[i] <- mu_cur
+    prec_samps[i] <- prec_cur
+  }
+## cont ...
+```
+
+## Gibbs Sampler Code
+
+```{r, echo=TRUE, eval=FALSE}
+    ## ... cont
+    ## Chop off the first part of the chain -- this reduces dependence on the starting point.
+    if(burnin == 0) {
+      list(mu_samps = mu_samps, theta_samps=theta_samps)
+    }
+    else {
+      list(mu_samps=mu_samps[-(1:burnin), ], prec_samps=prec_samp[-(1:burnin)])
+    }
+}
+```
+
+## The Gibbs Sampler
+
+<center>Animations</center>
+
+## Gibbs Sampler: Normal Hierarchical Model
+
+## Gibbs Sampler
+
+-   Pro: proposals, p($\theta^{(t+1)} \mid \theta^{(t)}$), are **never**
+    rejected.
+
+-   Pro: don't need to choose the proposal density distribution or tune
+    parameters of the density
+
+-   Con: it can be difficult to derive the full-conditional
+    distributions (unless, for example, the prior distributions are
+    chosen to be conjugate)
+
+-   Con: when the parameters of the posterior distribution are highly
+    correlated:
+
+    -   Autocorrelation of the samples is high
+    -   Effective sample size is low
+
+## Gibbs: a special case of MH
+
+## Gibbs Sampler: Finite Mixture Models
+
+<center>Reminder: mixture of binomials example</center>
+
+```{r binomial_setup, echo=TRUE}
+set.seed(123)
+n <- 25
+phi <- 0.4
+size <- 10
+z <- ifelse(rbinom(100, 1, phi), "Experience", "No Experience") 
+y <- rbinom(n, size=size, prob=ifelse(z=="Experience", 0.7, 0.3))
+```
+
+## Gibbs Sampler: Binomial Mixture {.smaller}
+
+```{r, dependson="binomial_setup", echo=TRUE}
+
+## Initialize all
+run_binomial_gibbs <- function() {
+experience_vec <- rbinom(n, 1, 0.5)
+theta_cur <- c(0.1, 0.9)
+phi_cur <- 0.5
+nsamps <- 10000
+
+theta_samps <- matrix(0, nrow=nsamps, ncol=2)
+colnames(theta_samps) <- c("theta1", "theta2")
+phi_samps <- numeric(nsamps)
+experience_samps <- matrix(0, nrow=nsamps, ncol=n)
+
+for(i in 1:nsamps) {
+  
+  ## Update experience indicators
+  experience_prob <- (phi_cur*dbinom(y, 10, prob=theta_cur[2])) / ((1-phi_cur)*dbinom(y, 10, prob=theta_cur[1]) + phi_cur*dbinom(y, 10, prob=theta_cur[2]))
+  
+  ## Z | ... ~ Bern( p )
+  
+  experience_vec <- 1*(runif(n) < experience_prob)
+  ## experience_vec <- rbern(experience_prob) ## equiv
+  
+    ## Update mixture weights
+  phi_cur <- rbeta(1, sum(experience_vec)+1, n-sum(experience_vec)+1)
+  phi_samps[i] <- phi_cur
+  
+  y0 <- y[experience_vec == 0]
+  n0 <- sum(experience_vec == 0)
+  y1 <- y[experience_vec == 1]
+  n1 <- sum(experience_vec)
+  
+  ## Update theta's
+  theta_cur[1] <- rbeta(1, sum(y0) + 1, size*n0 - sum(y0) + 1)
+  theta_cur[2] <- rbeta(1, sum(y1) + 1, size*n1-sum(y1) + 1)
+    
+  theta_samps[i, ] <- theta_cur
+}
+  cbind(theta_samps, phi_samps)
+}
+
+gibbs_results <- list(chain1=run_binomial_gibbs(), chain2=run_binomial_gibbs())
+```
+
+## Stan version
+
+```{r, echo=TRUE, dependson="binomial_setup"}
+library(cmdstanr)
+library(tidyverse)
+library(tidybayes)
+
+sm <- cmdstan_model("binomial_mix.stan")
+data_list=list(y=y, N=length(y), K=2)
+stan_res <- sm$sample(data=data_list, iter_warmup=10000, iter_sampling=20000, refresh=1000, chains=4)
+
+print(stan_res)
+
+stan_res %>% spread_draws(theta[K]) %>%
+  ggplot() + geom_line(aes(x=.iteration, y=theta, col=as.factor(.chain))) +
+  facet_wrap(~K)
+```
+
+
+## Quantile intervals
+
+```{r, echo=TRUE}
+quantile(gibbs_results[[1]][, "theta1"], c(0.025, 0.5, .975))
+quantile(gibbs_results[[1]][, "theta2"], c(0.025, 0.5, .975))
+quantile(gibbs_results[[1]][, "phi_samps"], c(0.025, 0.5, .975))
+```
+
+## Rhat
+
+```{r, echo=TRUE}
+
+rstan::Rhat(cbind(gibbs_results[[1]][, "theta1"], gibbs_results[[2]][, "theta1"]))
+rstan::Rhat(cbind(gibbs_results[[1]][, "theta2"],gibbs_results[[2]][, "theta2"]))
+```
+
+## Traceplots
+
+```{r, echo=TRUE}
+bayesplot::mcmc_trace(gibbs_results[[1]])
+```
+
+## Correcting label switching
+
+```{r, echo=TRUE}
+
+quantile(gibbs_results[[1]][, 1], c(0.05, .5, 0.95))
+                         
+quantile(apply(gibbs_results[[1]][, 1:2], 1, max), c(0.05, 0.5, 0.95))
+quantile(apply(gibbs_results[[1]][, 1:2], 1, min), c(0.05, 0.5, 0.95))
+```
+
+
