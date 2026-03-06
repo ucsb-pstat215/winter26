@@ -1,0 +1,282 @@
+---
+title: "Data Collection and Missing Data"
+format: 
+  revealjs:
+    theme: default
+    chalkboard: true
+    slide-number: true
+---
+
+```{r, echo=FALSE, warning=FALSE}
+library(knitr)
+library(ggplot2)
+library(kableExtra)
+library(patchwork)
+library(tidybayes)
+library(cmdstanr)
+check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
+register_knitr_engine(override = FALSE)
+options(mc.cores=4)
+suppressPackageStartupMessages(library(tidyverse))
+opts_chunk$set(echo=FALSE, fig.align='center', out.width="60%") 
+knitr::opts_chunk$set(dpi=300, fig.width=7)
+options("kableExtra.html.bsTable" = T)
+ig <- function(file) {knitr::include_graphics(file)}
+source("../scripts/make_figs.R")
+source("../scripts/color_defs.R")
+```
+
+### Announcements
+
+- Chapter 8 and 18
+
+## Notation
+
+- $y = (y_1, . . . , y_N )$, y is a matrix ($y_i$ can be a $p$-vector.
+
+- $I = (I_1, . . . , I_N)$ be a matrix of the same dimensions as y 
+
+-  ‘obs’= $\{(i,j): I_{ij} = 1\}$ and ‘mis’= $\{(i, j) : I_ij = 0\}$
+
+## Ignorability
+
+
+
+## Ignorability
+
+- Two conditions imply ignorability: 
+  + Missing at random
+  + Distinct parameters
+  
+## Censoring and Truncation
+
+```{r}
+library(cmdstanr)
+register_knitr_engine(override = TRUE)
+```
+
+
+```{r}
+
+truncation_point <- 1/2 ## Phi
+ntotal <- 1000
+true_mean <- 1
+y <- rnorm(ntotal, mean=true_mean, sd=1)
+nobs <- sum(y < truncation_point)
+yobs <- y[y < truncation_point]
+ybar_obs <- mean(yobs)
+```
+
+
+```{r}
+ggplot(tibble(y=y, obs=y < truncation_point)) + geom_histogram(aes(x=y, alpha=obs)) +
+  scale_alpha_discrete(range = c(0.25, 1)) +
+  theme_bw() + 
+  geom_vline(xintercept=ybar_obs, col="blue") + 
+  geom_vline(xintercept=true_mean, col="red") + 
+  ggtitle('N=50, theta=0, phi=0.5')
+```
+
+## Censoring (known point)
+
+## Censoring (known point)
+```{stan, output.var="cens_known", engine=cmdstan, echo=TRUE}
+data {
+
+  real<lower=0> truncation_point;
+  int<lower=0> ntotal;
+  int<lower=0> nobs;
+  real ybar_obs;
+} parameters {
+  real theta;
+}
+model {
+  ybar_obs ~ normal(theta, 1.0/sqrt(nobs));
+  target += (ntotal-nobs)*normal_lccdf(truncation_point | theta, 1.0);
+
+}
+```
+
+## {.smaller}
+```{r}
+fit <- cens_known$sample(data=list(ybar_obs=ybar_obs, ntotal = ntotal, nobs=nobs, truncation_point=0.5), refresh=100, show_messages=FALSE, show_exceptions=FALSE)
+fit$summary()
+```
+
+## Censoring (unknown point)
+
+## Censoring (unknown point)
+```{stan, output.var="cens_unknown",  engine=cmdstan, echo=TRUE}
+data {
+  real ybar;
+  real<lower=ybar> ymax;
+  real<lower=0> ntotal;
+  real<lower=0> nobs;
+} parameters {
+  real theta;
+  real<lower=ymax> truncation_point;
+}
+model {
+  target += normal_lpdf(ybar | theta, 1.0/sqrt(nobs)) +
+  (ntotal-nobs)*normal_lccdf(truncation_point | theta, 1.0);
+}
+```
+
+
+```{r, message=FALSE}
+fit_unknown <- cens_unknown$sample(data=list(ybar=ybar_obs, ymax = max(yobs), ntotal=ntotal, nobs=nobs), refresh=10, show_messages=FALSE, show_exceptions=FALSE)
+```
+
+## Unknown censoring point{.smaller}
+
+```{r}
+fit_unknown$summary()
+```
+
+## Truncation (known point)
+
+```{stan, output.var="trunc_known", engine=cmdstan, echo=TRUE}
+data {
+  real ybar;
+  real<lower=ybar> ymax;
+  real<lower=0> nobs;
+  real<lower=ymax> truncation_point;
+} parameters {
+  real theta;
+}
+model {
+  target += normal_lpdf(ybar | theta, 1.0/sqrt(nobs)) -
+  nobs*log(1.0 - Phi(theta - truncation_point));
+}
+```
+
+## Truncation (known point) {.smaller}
+```{r, message=FALSE}
+fit_unknown <- trunc_known$sample(data=list(ybar=ybar_obs, ymax = max(yobs), ntotal=ntotal, nobs=nobs, truncation_point=truncation_point), refresh=0, show_messages=FALSE, show_exceptions=FALSE)
+```
+
+```{r}
+fit_unknown$summary()
+```
+
+## Truncation (unknown point)
+
+## Truncation (unknown point)
+```{stan, output.var="trunc_unknown",  engine=cmdstan, echo=TRUE}
+data {
+  real ybar;
+  real<lower=ybar> ymax;
+  real<lower=0> ntotal;
+  real<lower=0> nobs;
+} parameters {
+  real theta;
+  real<lower=ymax> truncation_point;
+}
+model {
+  truncation_point ~ normal(0, 10);
+  target += normal_lpdf(ybar | theta, 1.0/sqrt(nobs)) -
+  nobs*log(1.0 - Phi(theta - truncation_point));
+}
+```
+
+## Truncation (unknown point) {.smaller}
+```{r, message=FALSE}
+fit_unknown <- trunc_unknown$sample(data=list(ybar=ybar_obs, ymax = max(yobs), ntotal=ntotal, nobs=nobs), refresh=0, show_messages=FALSE, show_exceptions=FALSE)
+```
+
+```{r}
+fit_unknown$summary()
+```
+
+## Multivariate Normal
+
+
+```{r}
+library(MASS)
+
+# Simulate some data
+mu <- c(10, 5, -5)
+Sig <- matrix(c(1, 0.7, 0.8,
+                0.7, 2, 0.2,
+                0.8, 0.2, 1.5), 
+              3, 3)
+N <- 1000
+y <- mvrnorm(N, mu, Sig)
+
+# Randomly remove some data (MAR)
+nmiss <- 315
+miss <- sample.int(prod(dim(y)), size = nmiss)
+y[miss] <- NA
+```
+
+
+```{r}
+# Extract the missing values into a VECTOR
+yobs <- y[!is.na(y)]
+
+# Extract the missing and present values as MATRICES
+ind_obs <- which(!is.na(y), arr.ind = TRUE)
+ind_miss <- which(is.na(y), arr.ind = TRUE)
+```
+
+## MVN with missingness in STAN
+
+```{stan, output.var="mvn_miss", engine = "cmdstan"}
+data {
+    int<lower=0> Nrow;
+    int<lower=0> Ncol;
+
+    int<lower=0> Nobs; // Number of non-missing values
+    int<lower=0> Nmiss; // Number of missing values
+
+    array[Nobs] real yobs;   // Vector of non-missing values
+    array[Nobs, 2] int ind_obs;     // Matrix (row, col) of non-missing value indices
+    array[Nmiss, 2] int ind_miss;     // Matrix (row, col) of missing value indices
+}
+parameters {
+    // Multivariate normal distribution parameters
+    vector[Ncol] mu;
+    cov_matrix[Ncol] Sigma;
+
+    // Vector containing "stochastic" nodes (for filling missing values
+    array[Nmiss] real ymiss;      
+}
+transformed parameters {
+    array[Nrow] vector[Ncol] y;   // The "data" with interpolated missing values
+    // Fill y with non-missing values 
+    for(n in 1:Nobs) {
+        y[ind_obs[n,1]][ind_obs[n,2]] = yobs[n];
+    }
+    // Fill the rest of y with missing value "parameters"
+    for(n in 1:Nmiss){
+        y[ind_miss[n,1]][ind_miss[n,2]] = ymiss[n];
+    }
+}
+model {
+    for(i in 1:Nrow){
+        target += multi_normal_lpdf(y[i] | mu, Sigma);
+    }
+}
+```
+
+```{r}
+mvn_data <- list(Nrow = nrow(y),
+                 Ncol = ncol(y),
+                 Nobs = length(yobs),
+                 Nmiss = sum(is.na(y)),
+                 yobs = yobs,
+                 ind_obs = ind_obs,
+                 ind_miss = ind_miss)
+
+fit <- mvn_miss$sample(data = mvn_data, refresh=0)
+
+fit %>% spread_draws(Sigma[i, j]) %>% 
+  left_join(expand_grid(i = 1:3, j=1:3) %>% mutate(true = as.numeric(Sig))) %>% 
+  ggplot() + geom_histogram(aes(x=Sigma)) + 
+  geom_vline(aes(xintercept=true), col="red") + 
+  facet_wrap(~i + j) + theme_bw() + ggtitle("Sigma")
+```
+
+
+
+            
