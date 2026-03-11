@@ -1,0 +1,163 @@
+---
+title: "Regression and Sparsity"
+format: revealjs
+---
+
+```{r, echo=FALSE, warning=FALSE}
+library(knitr)
+library(ggplot2)
+library(kableExtra)
+library(patchwork)
+library(tidybayes)
+library(bayesplot)
+# library(cmdstanr)
+# check_cmdstan_toolchain(fix = TRUE, quiet = TRUE)
+# register_knitr_engine(override = FALSE)
+options(mc.cores=4)
+suppressPackageStartupMessages(library(tidyverse))
+opts_chunk$set(echo=FALSE, fig.align='center', out.width="60%") 
+knitr::opts_chunk$set(dpi=300, fig.width=7)
+ig <- function(file) {knitr::include_graphics(file)}
+```
+
+## Regression Models
+
+## Sparsity
+
+- Lasso? 
+
+- "Spike and Slab"
+
+- Horseshoe Priors
+
+## Lasso and Laplace Priors
+
+
+## Spike and Slab
+
+
+
+## Horseshoe
+
+## Horsehoe
+
+```{r}
+ig("kj_plot.png")
+```
+
+## Compring Shrinkage Priors
+
+<center>![](shrinkage_priors.png){width=50%}</center>
+
+## Shrinkage Plots
+
+<center>![](horseshoe.png){width=40%}</center>
+
+## Finnish Horseshoe
+
+- Original horseshoe favors 0 or $\hat \beta$ as solutions
+
+- When coefficients are poorly identified, it's helpful to add additional regulation for the largest coefficients
+
+- The *regularized* horseshoe shrinks all coefficients by at least a small amount
+
+[Sparsity information and regularization in the horseshoe and other shrinkage priors](https://arxiv.org/pdf/1707.01694.pdf)
+
+## Regularized Horseshoe
+
+```{r}
+ig("kj_regularized.png")
+```
+
+## Global shrinkage parameter
+
+```{r}
+ig("tau_shrinkage.png")
+```
+
+## R2-D2 Prior
+
+- R2-induced Dirichlet decomposition (R2-D2)
+
+- A typical approach: specify a p-dimensional prior on all regression coefficients
+
+-  Alternative: specify a prior on $R^2$ and then conditionally on $\beta$
+
+    + For a fixed $R^2$, $\beta$ lies on an ellipsoid
+
+[Bayesian Regression Using a Prior on the Model Fit: The R2-D2 Shrinkage Prior](https://www.tandfonline.com/doi/full/10.1080/01621459.2020.1825449)
+
+## R2-D2
+
+
+```{r}
+ig("r2d2.png")
+```
+
+## Simulation
+
+- $n = 50$, $p=100$
+
+- All coefficients are zero except for three of them
+
+- Coefficients 2,4, and 6 have value 2
+
+- Compare Gaussian, Laplace and Horseshoe priors using rstanarm.
+
+```{r data_gen, echo=TRUE, message=FALSE}
+library(rstanarm)
+n <- 50
+p <- 100
+beta <- rep(0, p)
+beta[1:3] <- 2
+x <- matrix(rnorm(n*p), nrow=n)
+x <- as.matrix(apply(x, 2, scale))
+y <- rnorm(n=n, mean=x %*% beta, sd=1)
+
+p0 <- 10
+tau0 <- p0/(p-p0) * 1/sqrt(n)
+fit_hs <- stan_glm(y~x, gaussian(), prior=hs(global_scale=tau0, slab_scale=2.5, slab_df=4), data=tibble(x=x,y=y))
+
+posterior <- as.matrix(fit_hs)
+hs_dens <- mcmc_areas(posterior, pars=paste0("x", 1:10)) + xlim(c(-3, 3)) + ggtitle("Horseshoe")
+hs_dens
+```
+
+
+## Gaussian Laplace fits
+```{r, dependson="data_gen", cache=TRUE, message=FALSE, echo=TRUE}
+fit_gaus <- stan_glm(y~x, gaussian(), prior=normal(scale=1), data=tibble(x=x,y=y))
+posterior_gaus <- as.matrix(fit_gaus)
+gaus_dens <- mcmc_areas(posterior_gaus, pars=paste0("x", 1:10)) + xlim(c(-5, 5)) + ggtitle("Gaussian")
+
+fit_lap <- stan_glm(y~x, gaussian(), prior=laplace(scale=1), data=tibble(x=x,y=y))
+posterior_lap <- as.matrix(fit_lap)
+lap_dens <- mcmc_areas(posterior_lap, pars=paste0("x", 1:10)) + xlim(c(-5, 5)) + ggtitle("Laplace")
+```
+
+## R2-D2 Fit
+```{r, dependson="data_gen", cache=TRUE, message=FALSE, echo=TRUE}
+library(brms)
+options(mc.cores=4)
+brm_fit <- brm(y ~ x, data=tibble(y=y, x=x), 
+               prior=set_prior(R2D2(mean_R2 = 0.5, prec_R2 = 2, 
+                                    cons_D2 = 0.1)), 
+               family=gaussian())
+r2d2_dens <- mcmc_plot(brm_fit, type="areas", variable = paste0("b_x", 1:10)) + ggtitle("R2-D2") + xlim(c(-3, 3))
+```
+
+## Comparison Plots
+```{r, out.width="80%"}
+#library(patchwork)
+gaus_dens + lap_dens + hs_dens #+ r2d2_dens
+```
+
+## Loo Comparison
+```{r, echo=TRUE}
+loo_hs <- loo(fit_hs)
+loo_gaus <- loo(fit_gaus)
+loo_lap <- loo(fit_lap)
+#loo_r2d2 <- loo(brm_fit)
+
+loo_compare(loo_hs, loo_gaus, loo_lap)
+```
